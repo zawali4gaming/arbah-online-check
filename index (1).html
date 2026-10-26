@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARBAH — السجلات والتقارير أونلاين</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{--bg:#13111c;--card:#1e1b2e;--line:#3b2f63;--txt:#e9e5f7;--mut:#9a93b8;--p:#8b5cf6;--ok:#34d399;--bad:#fb7185;--warn:#fbbf24}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:Cairo,Tahoma,Arial,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 10px;color:var(--mut)}
+input,button{font:inherit;border-radius:12px;border:1px solid var(--line);padding:10px 12px;background:#141221;color:var(--txt)}
+button{background:var(--p);border:0;cursor:pointer;font-weight:700}button.sec{background:#2a2545}
+.login{max-width:380px;margin:12vh auto;display:grid;gap:12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:14px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:12px 0}.tabs button{background:#2a2545;white-space:nowrap}.tabs button.on{background:var(--p)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.k{font-size:12px;color:var(--mut)}.v{font-size:20px;font-weight:800;margin-top:4px}
+.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th{color:var(--mut)}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.hide{display:none}.err{color:var(--bad);font-size:13px;min-height:18px}
+</style>
+</head>
+<body>
+<div id="loginView" class="card login">
+  <h1>ARBAH — دخول التقارير</h1>
+  <input id="phone" inputmode="numeric" placeholder="رقم هاتف الحساب" autocomplete="username">
+  <input id="pass" type="password" placeholder="كلمة المرور" autocomplete="current-password">
+  <button id="loginBtn">دخول</button>
+  <div id="err" class="err"></div>
+</div>
+
+<div id="appView" class="wrap hide">
+  <div class="bar">
+    <div><h1 id="shopName">—</h1><div class="k" id="syncInfo"></div></div>
+    <div class="row"><button class="sec" id="refreshBtn">تحديث</button><button class="sec" id="logoutBtn">خروج</button></div>
+  </div>
+  <div class="card row">
+    <label class="k">من <input type="date" id="from"></label>
+    <label class="k">إلى <input type="date" id="to"></label>
+    <button class="sec" id="clearBtn">كل الفترات</button>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div id="content"></div>
+</div>
+
+<script>
+// ===== أدخل بيانات مشروع Supabase (Project Settings > API) =====
+const SUPABASE_URL = 'https://sfxotfapvhqgsjqgpwnz.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmeG90ZmFwdmhxZ3NqcWdwd256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwNDkxNjYsImV4cCI6MjEwODYyNTE2Nn0.y9Auafy4RP0TJQqlS-ExOwwh01zbZouykX7xLIiUtAQ';
+// ================================================================
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => (Number(n) || 0).toFixed(2).replace('.', ',') + ' دج';
+const fdate = d => { const x = new Date(d); return isNaN(x) ? '' : x.toLocaleString('ar-DZ', {dateStyle:'short', timeStyle:'short'}); };
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const emailOf = phone => phone.replace(/\D/g, '') + '@arbah.app';
+let DATA = null, TAB = 'report';
+const TABS = [['report','التقرير'],['sales','المبيعات'],['expenses','المصاريف'],['purchases','المشتريات'],['cash','الصندوق'],['debts','الديون'],['stock','المخزون'],['activity','سجل النشاط']];
+
+function inRange(d) {
+  const t = new Date(d).getTime(), f = $('from').value, e = $('to').value;
+  if (f && t < new Date(f + 'T00:00:00').getTime()) return false;
+  if (e && t > new Date(e + 'T23:59:59').getTime()) return false;
+  return true;
+}
+const table = (heads, rows) => rows.length
+  ? `<div class="card scroll"><table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+  : '<div class="card k">لا توجد سجلات في هذه الفترة.</div>';
+const kpi = (k, v, cls='') => `<div class="card"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`;
+const byDateDesc = (a, b) => new Date(b.date) - new Date(a.date);
+
+function render() {
+  if (!DATA) return;
+  const sales = (DATA.sales || []).filter(s => inRange(s.date)).sort(byDateDesc);
+  const expenses = (DATA.expenses || []).filter(x => inRange(x.date)).sort(byDateDesc);
+  const purchases = (DATA.purchases || []).filter(x => inRange(x.date)).sort(byDateDesc);
+  const cash = (DATA.cashMovements || []).filter(x => inRange(x.date)).sort(byDateDesc);
+  const acts = (DATA.activityLogs || []).filter(x => inRange(x.date)).sort(byDateDesc);
+  const sum = (arr, f) => arr.reduce((a, x) => a + (Number(f(x)) || 0), 0);
+  let h = '';
+  if (TAB === 'report') {
+    const rev = sum(sales, s => s.total), profit = sum(sales, s => s.profit), exp = sum(expenses, x => x.amount);
+    const debts = sum(DATA.clients || [], c => c.debt), sup = sum(DATA.suppliers || [], s => s.debt);
+    const cin = sum(cash.filter(c => c.direction === 'in'), c => c.amount), cout = sum(cash.filter(c => c.direction === 'out'), c => c.amount);
+    h = `<div class="grid">${kpi('عدد الفواتير', sales.length)}${kpi('إجمالي المبيعات', money(rev))}${kpi('الربح الإجمالي', money(profit), 'ok')}
+      ${kpi('المصاريف', money(exp), 'bad')}${kpi('صافي الربح', money(profit - exp), profit - exp >= 0 ? 'ok' : 'bad')}${kpi('المشتريات', money(sum(purchases, p => p.total ?? p.totalCost)))}
+      ${kpi('المقبوضات', money(cin), 'ok')}${kpi('المدفوعات', money(cout), 'bad')}${kpi('ديون الزبائن', money(debts), 'warn')}${kpi('ديون الموردين', money(sup), 'warn')}</div>`;
+  } else if (TAB === 'sales') {
+    h = table(['الفاتورة','التاريخ','الزبون','الأصناف','الإجمالي','المدفوع','المتبقي','الدفع','الربح','الكاشير'],
+      sales.map(s => [`INV-${esc(s.id)}`, fdate(s.date), esc(s.clientName), esc((s.items||[]).map(i=>`${i.name} ×${i.qty}`).join('، ')), money(s.total), money(s.paid), money(s.remaining), esc(s.paymentMethod), money(s.profit), esc(s.cashier)]));
+  } else if (TAB === 'expenses') {
+    h = table(['التاريخ','البيان','المبلغ','الدفع','المستخدم'], expenses.map(x => [fdate(x.date), esc(x.title), money(x.amount), esc(x.paymentMethod), esc(x.user)]));
+  } else if (TAB === 'purchases') {
+    h = table(['التاريخ','المورد','الفاتورة','الإجمالي','المدفوع'], purchases.map(p => [fdate(p.date), esc(p.supplierName), esc(p.invNum || p.id), money(p.total ?? p.totalCost), money(p.paid)]));
+  } else if (TAB === 'cash') {
+    h = table(['التاريخ','النوع','المبلغ','الوسيلة','البيان'], cash.map(c => [fdate(c.date), c.direction === 'in' ? '<span class="ok">قبض</span>' : '<span class="bad">صرف</span>', money(c.amount), esc(c.method), esc(c.description)]))
+      + '<h2 style="margin-top:14px">إغلاقات الصندوق</h2>'
+      + table(['اليوم','المتوقع','المعدود','الفرق'], (DATA.cashClosures || []).filter(c => inRange(c.date + 'T12:00:00')).map(c => [esc(c.date), money(c.expectedBalance), money(c.countedBalance), `<span class="${c.difference < 0 ? 'bad' : 'ok'}">${money(c.difference)}</span>`]));
+  } else if (TAB === 'debts') {
+    h = '<h2>ديون الزبائن</h2>' + table(['الزبون','الهاتف','الدين'], (DATA.clients || []).filter(c => c.debt > 0).map(c => [esc(c.name), esc(c.phone), `<span class="warn">${money(c.debt)}</span>`]))
+      + '<h2 style="margin-top:14px">ديون الموردين</h2>' + table(['المورد','الدين'], (DATA.suppliers || []).filter(s => s.debt > 0).map(s => [esc(s.name), money(s.debt)]));
+  } else if (TAB === 'stock') {
+    h = table(['المنتج','المخزون','سعر البيع','التكلفة','الصلاحية'], (DATA.products || []).map(p => [esc(p.name), `<span class="${p.stock <= 0 ? 'bad' : ''}">${esc(p.stock)}</span>`, money(p.price), money(p.cost), esc(p.expiryDate || '')]));
+  } else {
+    h = table(['التاريخ','العملية','التفاصيل','المبلغ','المستخدم'], acts.map(a => [fdate(a.date), esc(a.action), esc(a.details), money(a.amount), esc(a.user)]));
+  }
+  $('content').innerHTML = h;
+  $('tabs').innerHTML = TABS.map(([k, t]) => `<button class="${k === TAB ? 'on' : ''}" data-t="${k}">${t}</button>`).join('');
+}
+
+async function load() {
+  const { data, error } = await sb.from('arbah_snapshots').select('payload, updated_at').maybeSingle();
+  if (error) { $('err').textContent = 'تعذر جلب البيانات.'; return false; }
+  if (!data) { $('err').textContent = 'لا توجد بيانات بعد. سجّل الدخول من البرنامج مرة واحدة لتبدأ المزامنة.'; return false; }
+  DATA = data.payload;
+  $('shopName').textContent = (DATA.shop && DATA.shop.name) || 'ARBAH';
+  $('syncInfo').textContent = 'آخر مزامنة: ' + fdate(data.updated_at);
+  render();
+  return true;
+}
+async function enter() {
+  $('loginView').classList.add('hide'); $('appView').classList.remove('hide');
+  if (!(await load())) { await sb.auth.signOut(); $('appView').classList.add('hide'); $('loginView').classList.remove('hide'); }
+}
+$('loginBtn').onclick = async () => {
+  $('err').textContent = '';
+  const phone = $('phone').value.trim(), pass = $('pass').value;
+  if (!/^\d{8,15}$/.test(phone.replace(/\D/g, ''))) { $('err').textContent = 'أدخل رقم هاتف صحيحاً.'; return; }
+  $('loginBtn').disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: emailOf(phone), password: pass });
+  $('loginBtn').disabled = false;
+  if (error) { $('err').textContent = 'رقم الهاتف أو كلمة المرور غير صحيحة.'; return; }
+  enter();
+};
+$('pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+$('logoutBtn').onclick = async () => { await sb.auth.signOut(); DATA = null; $('appView').classList.add('hide'); $('loginView').classList.remove('hide'); };
+$('refreshBtn').onclick = load;
+$('clearBtn').onclick = () => { $('from').value = ''; $('to').value = ''; render(); };
+$('from').onchange = $('to').onchange = render;
+$('tabs').onclick = e => { const t = e.target.dataset.t; if (t) { TAB = t; render(); } };
+sb.auth.getSession().then(({ data }) => { if (data.session) enter(); });
+</script>
+</body>
+</html>
