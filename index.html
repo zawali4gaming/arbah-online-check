@@ -57,7 +57,13 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const money = n => (Number(n) || 0).toFixed(2).replace('.', ',') + ' دج';
 const fdate = d => { const x = new Date(d); return isNaN(x) ? '' : x.toLocaleString('ar-DZ', {dateStyle:'short', timeStyle:'short'}); };
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const emailOf = phone => phone.replace(/\D/g, '') + '@arbah.app';
+const normPhone = phone => {
+  const n = String(phone || '').replace(/[\u0660-\u0669\u06F0-\u06F9]/g, d => String(d.charCodeAt(0) - (d.charCodeAt(0) <= 0x0669 ? 0x0660 : 0x06F0))).replace(/\D/g, '');
+  if (/^00213\d{9}$/.test(n)) return '0' + n.slice(5);
+  if (/^213\d{9}$/.test(n)) return '0' + n.slice(3);
+  return n;
+};
+const emailOf = phone => normPhone(phone) + '@arbah.app';
 let DATA = null, TAB = 'report';
 const TABS = [['report','التقرير'],['sales','المبيعات'],['expenses','المصاريف'],['purchases','المشتريات'],['cash','الصندوق'],['debts','الديون'],['stock','المخزون'],['activity','سجل النشاط']];
 
@@ -129,7 +135,7 @@ async function enter() {
 $('loginBtn').onclick = async () => {
   $('err').textContent = '';
   const phone = $('phone').value.trim(), pass = $('pass').value;
-  if (!/^\d{8,15}$/.test(phone.replace(/\D/g, ''))) { $('err').textContent = 'أدخل رقم هاتف صحيحاً.'; return; }
+  if (!/^\d{8,15}$/.test(normPhone(phone))) { $('err').textContent = 'أدخل رقم هاتف صحيحاً.'; return; }
   $('loginBtn').disabled = true;
   const { error } = await sb.auth.signInWithPassword({ email: emailOf(phone), password: pass });
   $('loginBtn').disabled = false;
