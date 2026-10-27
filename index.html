@@ -27,7 +27,7 @@ th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;whit
 <body>
 <div id="loginView" class="card login">
   <h1>ARBAH — دخول التقارير</h1>
-  <input id="phone" inputmode="numeric" placeholder="رقم هاتف الحساب" autocomplete="username">
+  <input id="phone" inputmode="numeric" placeholder="رقم التعريف تواصل معنا للحصول عليه" autocomplete="username">
   <input id="pass" type="password" placeholder="كلمة المرور" autocomplete="current-password">
   <button id="loginBtn">دخول</button>
   <div id="err" class="err"></div>
@@ -135,11 +135,11 @@ async function enter() {
 $('loginBtn').onclick = async () => {
   $('err').textContent = '';
   const phone = $('phone').value.trim(), pass = $('pass').value;
-  if (!/^\d{8,15}$/.test(normPhone(phone))) { $('err').textContent = 'أدخل رقم هاتف صحيحاً.'; return; }
+  if (!/^\d{8,15}$/.test(normPhone(phone))) { $('err').textContent = 'أدخل رقما تعريفيا صحيحاً.'; return; }
   $('loginBtn').disabled = true;
   const { error } = await sb.auth.signInWithPassword({ email: emailOf(phone), password: pass });
   $('loginBtn').disabled = false;
-  if (error) { $('err').textContent = 'رقم الهاتف أو كلمة المرور غير صحيحة.'; return; }
+  if (error) { $('err').textContent = 'رقم التعريف أو كلمة المرور غير صحيحة.'; return; }
   enter();
 };
 $('pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
